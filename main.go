@@ -299,7 +299,7 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-// Function to create directory structure based on JamManType
+// Function to create directory structure based on the number of WAV files
 func createDirectoryStructure(driveLetter, jamManType, wavFileLoc string) {
 	var rootDir string
 
@@ -319,9 +319,19 @@ func createDirectoryStructure(driveLetter, jamManType, wavFileLoc string) {
 		log.Fatalf("Error: %v", err)
 	}
 
-	// Create directories for patches (Patch01 to Patch99) and PhraseA subfolders
-	for i := 1; i <= 99; i++ {
-		patchFolder := fmt.Sprintf("Patch%02d", i)
+	// Count the number of WAV files in wavFileLoc directory
+	files, err := os.ReadDir(wavFileLoc)
+	if err != nil {
+		log.Fatalf("Error reading wav file directory: %v", err)
+	}
+
+	// Create only the necessary number of directories based on the number of WAV files
+	for i, file := range files {
+		if filepath.Ext(file.Name()) != ".wav" {
+			continue // Skip non-wav files
+		}
+
+		patchFolder := fmt.Sprintf("Patch%02d", i+1)
 		patchPath := filepath.Join(rootDir, patchFolder, "PhraseA")
 
 		// Create the full directory path
@@ -333,7 +343,7 @@ func createDirectoryStructure(driveLetter, jamManType, wavFileLoc string) {
 		fmt.Printf("Created directory: %s\n", patchPath)
 	}
 
-	fmt.Println("All directories created successfully.")
+	fmt.Println("Necessary directories created successfully.")
 
 	// Handle copying WAV files and creating CSV and XML
 	err = handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc)
