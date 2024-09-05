@@ -5,7 +5,6 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -169,27 +168,49 @@ func generatePhraseXML(phraseDir string, phraseData PhraseXMLData) error {
 	return nil
 }
 
-// Function to handle .wav files and generate XML files and CSV
+// Function to create or open and write to songs.csv
+func createCSV(driveLetter string) (*csv.Writer, *os.File, error) {
+	csvFilePath := filepath.Join(driveLetter, "songs.csv")
+	_, err := os.Stat(csvFilePath)
+	var csvFile *os.File
+
+	// If file doesn't exist, create it and write headers
+	if os.IsNotExist(err) {
+		csvFile, err = os.Create(csvFilePath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create songs.csv: %v", err)
+		}
+
+		// Create CSV writer and write headers
+		writer := csv.NewWriter(csvFile)
+		headers := []string{"songName", "bpMeasure", "bpMinute", "StopMode", "RhythmType", "patchNumber", "wavFileLoc"}
+		if err := writer.Write(headers); err != nil {
+			return nil, nil, fmt.Errorf("failed to write CSV headers: %v", err)
+		}
+		writer.Flush()
+	} else {
+		// If file exists, open in append mode
+		csvFile, err = os.OpenFile(csvFilePath, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open songs.csv: %v", err)
+		}
+	}
+
+	writer := csv.NewWriter(csvFile)
+	return writer, csvFile, nil
+}
+
+// Function to handle .wav files, generate XML files, and update CSV
 func handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc string) error {
 	// Create or open the songs.csv file
-	csvFile, err := os.Create(filepath.Join(driveLetter, "songs.csv"))
+	writer, csvFile, err := createCSV(driveLetter)
 	if err != nil {
-		return fmt.Errorf("failed to create songs.csv: %v", err)
+		return fmt.Errorf("failed to create or open CSV: %v", err)
 	}
 	defer csvFile.Close()
 
-	// Prepare the CSV writer
-	writer := csv.NewWriter(csvFile)
-	defer writer.Flush()
-
-	// Write CSV headers
-	headers := []string{"songName", "bpMeasure", "bpMinute", "StopMode", "RhythmType", "patchNumber", "wavFileLoc"}
-	if err := writer.Write(headers); err != nil {
-		return fmt.Errorf("failed to write CSV headers: %v", err)
-	}
-
-	// Read the WAV files from the wavFileLoc directory
-	files, err := ioutil.ReadDir(wavFileLoc)
+	// List the WAV files from the wavFileLoc directory
+	files, err := os.ReadDir(wavFileLoc)
 	if err != nil {
 		return fmt.Errorf("failed to read wav files directory: %v", err)
 	}
@@ -200,13 +221,12 @@ func handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc string) error {
 			continue // Skip non-wav files
 		}
 
-		// Assign to PatchXX
 		patchNumber := fmt.Sprintf("Patch%02d", i+1)
 		patchDir := filepath.Join(rootDir, patchNumber)
 		phraseDir := filepath.Join(patchDir, "PhraseA")
-		destPath := filepath.Join(phraseDir, file.Name())
+		destPath := filepath.Join(phraseDir, "phrase.wav")
 
-		// Copy the WAV file to the appropriate directory
+		// Copy the WAV file and rename it to phrase.wav
 		srcFile := filepath.Join(wavFileLoc, file.Name())
 		err := copyFile(srcFile, destPath)
 		if err != nil {
@@ -215,17 +235,18 @@ func handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc string) error {
 
 		// Write song details to the CSV
 		record := []string{
-			file.Name(),
-			"4",                         // bpMeasure (default)
-			"124.9213180542",            // bpMinute (default)
-			"StopInstantly",             // StopMode (default)
-			"StudioKickAndHighHat",      // RhythmType (default)
-			patchNumber,                 // Patch Number
-			srcFile,                     // Absolute path to the WAV file
+			file.Name(),                   // songName
+			"4",                           // bpMeasure (default)
+			"124.9213180542",              // bpMinute (default)
+			"StopInstantly",               // StopMode (default)
+			"StudioKickAndHighHat",        // RhythmType (default)
+			patchNumber,                   // Patch number
+			filepath.Join(wavFileLoc, file.Name()), // wavFileLoc (absolute path)
 		}
 		if err := writer.Write(record); err != nil {
 			return fmt.Errorf("failed to write to CSV: %v", err)
 		}
+		writer.Flush()
 
 		// Generate patch.xml and phrase.xml for this patch
 		patchData := PatchXMLData{
