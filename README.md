@@ -1,4 +1,7 @@
 ## Why This Application is Necessary
+ 
+ 
+https://www.youtube.com/watch?v=sjRwXzXtR94
 
 The DigiTech JamMan XT and JamMan Stereo are powerful loopers, but they face compatibility issues with newer operating systems, especially Windows 11. One major problem is that USB connectivity, which is essential for transferring files between the device and a computer, no longer works reliably on newer systems. This leaves many musicians with limited ways to manage their audio files for these devices.
 
