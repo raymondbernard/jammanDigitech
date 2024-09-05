@@ -354,6 +354,9 @@ func createDirectoryStructure(driveLetter, jamManType, wavFileLoc string) {
 
 func main() {
 	// Path to your INI file
+	fmt.Println("Welcome to JamMan utility created by Ray Bernard")
+	fmt.Println("contact : ray.bernard@outlook.com")
+
 	iniPath := "jamman.ini"
 
 	// Load the configuration from the INI file
@@ -369,9 +372,9 @@ func main() {
 	}
 
 	// Confirm the drive letter with the user
-	fmt.Printf("Found SSD at drive '%s'. Is this correct? (y/n): ", driveLetter)
+	fmt.Printf("Found MicroSD card at drive '%s'. Is this correct? (y/n): ", driveLetter)
 	var response string
-	fmt.Scanln(&response)
+	fmt.Scanln(&response) 
 
 	if response != "y" {
 		fmt.Print("Please enter the correct drive letter: ")
