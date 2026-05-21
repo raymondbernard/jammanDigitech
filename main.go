@@ -444,20 +444,32 @@ func main() {
 		log.Fatalf("Error loading configuration: %v", err)
 	}
 
-	// Find the drive letter by the volume name (e.g., 'JAMMAN')
+	// Try to find the drive letter by the volume name (e.g., 'JAMMAN')
 	driveLetter, err := findDriveByVolume(config.SSDVolumeName)
+
+	// If wmic is not available, prompt user to enter drive letter manually
 	if err != nil {
-		log.Fatalf("Error finding drive by volume name: %v", err)
-	}
-
-	// Confirm the drive letter with the user
-	fmt.Printf("Found MicroSD card at drive '%s'. Is this correct? (y/n): ", driveLetter)
-	var response string
-	fmt.Scanln(&response)
-
-	if response != "y" {
-		fmt.Print("Please enter the correct drive letter: ")
+		fmt.Printf("Could not auto-detect MicroSD card (wmic not available or drive not found).\n")
+		fmt.Printf("Please enter the drive letter where your '%s' MicroSD card is located (e.g., D, E, F): ", config.SSDVolumeName)
 		fmt.Scanln(&driveLetter)
+
+		// Ensure drive letter has colon
+		if len(driveLetter) == 1 {
+			driveLetter = driveLetter + ":"
+		}
+	} else {
+		// Confirm the drive letter with the user
+		fmt.Printf("Found MicroSD card at drive '%s'. Is this correct? (y/n): ", driveLetter)
+		var response string
+		fmt.Scanln(&response)
+
+		if response != "y" {
+			fmt.Print("Please enter the correct drive letter: ")
+			fmt.Scanln(&driveLetter)
+			if len(driveLetter) == 1 {
+				driveLetter = driveLetter + ":"
+			}
+		}
 	}
 
 	// Create the directory structure and handle WAV files and XML generation
