@@ -13,9 +13,11 @@ But it doesn't stop there.
 ### Key Features:
 - **Automated File Formatting**: This program automatically organizes your `.wav` files into the folder structure that DigiTech JamMan devices require, so there’s no guesswork.
   
-- **Customizable Metadata**: You can define details like beats per minute (BPM), rhythm types, and the number of measures, allowing you to customize your backing tracks to suit your performance needs.
+- **Intelligent BPM Detection**: Automatically detects beats per minute from your WAV filename (e.g., `song-120bpm.wav`) or prompts you to input it interactively. Each song gets accurate timing metadata.
   
-- **CSV Documentation**: As you import songs, the program also generates a CSV file. This acts as a useful reference for mapping which song goes to which patch location on your JamMan. It not only makes it easy to track your songs but also documents their settings.
+- **Customizable Metadata**: You can define details like beats per minute (BPM), rhythm types, and the number of measures in the `jamman.ini` configuration file, allowing you to customize your backing tracks to suit your performance needs.
+  
+- **CSV Documentation**: As you import songs, the program also generates a CSV file. This acts as a useful reference for mapping which song goes to which patch location on your JamMan. It not only makes it easy to track your songs but also documents their settings, including the detected BPM for each track.
 
 ### Why This is Different
 
@@ -48,10 +50,15 @@ Before running the program, make sure you have:
    - [Download `jamman.ini`](#) and configure the settings based on your SSD and file locations.
 
 3. **Configure `jamman.ini`**:
-   - Open `jamman.ini` and define the following settings:
+   - Open `jamman.ini` and define the following settings under `[JamManSettings]`:
      - `JamManType`: Set this to either `JamManSoloXT` or `JamManStereo`, depending on your device.
      - `SSDLocation`: Specify the volume name of your SSD (e.g., `JAMMAN`).
      - `wavFileLoc`: Provide the path where your `.wav` files are stored (e.g., `C:\Users\YourUser\Music\`).
+   
+   - Additionally, configure the `[PhraseXMLDefaults]` section with default values:
+     - `BeatsPerMinute`: Default BPM for songs (e.g., `124.9213180542`).
+     - `BeatsPerMeasure`: Default beats per measure (e.g., `4`).
+     - `IsLoop`: Whether phrases should loop by default (`0` or `1`).
 
 4. **Create the Directory on the MicroSSD**:
    - Ensure that the program will create the correct directory structure (`JamManSoloXT` or `JamManStereo`).
@@ -63,6 +70,21 @@ Before running the program, make sure you have:
      jamman.exe
      ```
    - The program will process your `.wav` files, organize them into the correct folder structure on your SSD, and generate a CSV file documenting the songs, BPMs, rhythm types, and patch locations.
+
+### Automatic BPM Detection
+
+The program intelligently detects the beats per minute (BPM) for each song in two ways:
+
+1. **From Filename**: If your WAV file names include BPM information in a recognizable format, the program extracts it automatically.
+   - Supported formats: `song-120bpm.wav`, `song-120-bpm.wav`, `120-song.wav`
+   - The program looks for the pattern `bpm` and extracts the numeric value.
+
+2. **Interactive Input**: If BPM is not detected in the filename, you'll be prompted to enter:
+   - The BPM for each song
+   - The beats per measure for each song
+   - You can press Enter to use the defaults from `jamman.ini`
+
+This ensures that each song has accurate timing information in its XML metadata, allowing your JamMan device to synchronize backing tracks correctly.
 
 ### Compiling from Source
 
