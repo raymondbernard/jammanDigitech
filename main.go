@@ -9,32 +9,37 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/template"
+
 	"gopkg.in/ini.v1"
 )
 
 // Config structure to hold INI values
 type Config struct {
-	JamManType    string
-	SSDVolumeName string
-	WavFileLoc    string
+	JamManType      string
+	SSDVolumeName   string
+	WavFileLoc      string
+	BeatsPerMinute  string
+	BeatsPerMeasure string
+	IsLoop          string
 }
 
 // PatchXML template structure
 type PatchXMLData struct {
-	PatchName   string
-	RhythmType  string
-	StopMode    string
-	ID          string
+	PatchName  string
+	RhythmType string
+	StopMode   string
+	ID         string
 }
 
 // PhraseXML template structure
 type PhraseXMLData struct {
-	BeatsPerMinute   string
-	BeatsPerMeasure  string
-	IsLoop           string
-	ID               string
+	BeatsPerMinute  string
+	BeatsPerMeasure string
+	IsLoop          string
+	ID              string
 }
 
 // Function to load the INI configuration file
@@ -46,9 +51,12 @@ func loadConfig(file string) (*Config, error) {
 
 	// Load values from the INI file
 	config := &Config{
-		JamManType:    cfg.Section("JamManSettings").Key("JamManType").String(),
-		SSDVolumeName: cfg.Section("JamManSettings").Key("SSDLocation").String(),
-		WavFileLoc:    cfg.Section("JamManSettings").Key("wavFileLoc").String(),
+		JamManType:      cfg.Section("JamManSettings").Key("JamManType").String(),
+		SSDVolumeName:   cfg.Section("JamManSettings").Key("SSDLocation").String(),
+		WavFileLoc:      cfg.Section("JamManSettings").Key("wavFileLoc").String(),
+		BeatsPerMinute:  cfg.Section("PhraseXMLDefaults").Key("BeatsPerMinute").String(),
+		BeatsPerMeasure: cfg.Section("PhraseXMLDefaults").Key("BeatsPerMeasure").String(),
+		IsLoop:          cfg.Section("PhraseXMLDefaults").Key("IsLoop").String(),
 	}
 
 	return config, nil
@@ -201,7 +209,7 @@ func createCSV(driveLetter string) (*csv.Writer, *os.File, error) {
 }
 
 // Function to handle .wav files, generate XML files, and update CSV
-func handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc string) error {
+func handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc string, config *Config) error {
 	// Create or open the songs.csv file
 	writer, csvFile, err := createCSV(driveLetter)
 	if err != nil {
@@ -221,6 +229,11 @@ func handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc string) error {
 			continue // Skip non-wav files
 		}
 
+		wavFilePath := filepath.Join(wavFileLoc, file.Name())
+
+		// Detect BPM and beats per measure for this specific file
+		detectedBPM, detectedBeatsPerMeasure := detectAudioMetadata(wavFilePath, config)
+
 		patchNumber := fmt.Sprintf("Patch%02d", i+1)
 		patchDir := filepath.Join(rootDir, patchNumber)
 		phraseDir := filepath.Join(patchDir, "PhraseA")
@@ -235,13 +248,13 @@ func handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc string) error {
 
 		// Write song details to the CSV
 		record := []string{
-			file.Name(),                   // songName
-			"4",                           // bpMeasure (default)
-			"124.9213180542",              // bpMinute (default)
-			"StopInstantly",               // StopMode (default)
-			"StudioKickAndHighHat",        // RhythmType (default)
-			patchNumber,                   // Patch number
-			filepath.Join(wavFileLoc, file.Name()), // wavFileLoc (absolute path)
+			file.Name(),             // songName
+			detectedBeatsPerMeasure, // bpMeasure (detected)
+			detectedBPM,             // bpMinute (detected)
+			"StopInstantly",         // StopMode (default)
+			"StudioKickAndHighHat",  // RhythmType (default)
+			patchNumber,             // Patch number
+			wavFilePath,             // wavFileLoc (absolute path)
 		}
 		if err := writer.Write(record); err != nil {
 			return fmt.Errorf("failed to write to CSV: %v", err)
@@ -250,16 +263,16 @@ func handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc string) error {
 
 		// Generate patch.xml and phrase.xml for this patch
 		patchData := PatchXMLData{
-			PatchName:   file.Name(),
-			RhythmType:  "StudioKickAndHighHat",
-			StopMode:    "StopInstantly",
-			ID:          fmt.Sprintf("patch-%d", i+1), // Unique ID
+			PatchName:  file.Name(),
+			RhythmType: "StudioKickAndHighHat",
+			StopMode:   "StopInstantly",
+			ID:         fmt.Sprintf("patch-%d", i+1), // Unique ID
 		}
 		phraseData := PhraseXMLData{
-			BeatsPerMinute:   "124.9213180542", // Default BPM
-			BeatsPerMeasure:  "4",              // Default beats per measure
-			IsLoop:           "1",              // Default loop setting
-			ID:               fmt.Sprintf("phrase-%d", i+1), // Unique ID
+			BeatsPerMinute:  detectedBPM,                   // Detected BPM
+			BeatsPerMeasure: detectedBeatsPerMeasure,       // Detected beats per measure
+			IsLoop:          "1",                           // Default loop setting
+			ID:              fmt.Sprintf("phrase-%d", i+1), // Unique ID
 		}
 
 		// Generate patch.xml in PatchXX directory
@@ -274,7 +287,7 @@ func handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc string) error {
 			return fmt.Errorf("failed to generate phrase.xml: %v", err)
 		}
 
-		fmt.Printf("Processed file: %s -> %s\n", file.Name(), destPath)
+		fmt.Printf("Processed file: %s -> %s (BPM: %s, Beats/Measure: %s)\n", file.Name(), destPath, detectedBPM, detectedBeatsPerMeasure)
 	}
 
 	fmt.Println("CSV file, XML files, and directories updated successfully.")
@@ -299,8 +312,74 @@ func copyFile(src, dst string) error {
 	return err
 }
 
+// Function to prompt user for BPM and beats per measure for a song
+func promptForAudioMetadata(songName string, defaultBPM, defaultBeatsPerMeasure string) (string, string) {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Printf("\nEnter BPM for '%s' (default: %s): ", songName, defaultBPM)
+	bpmInput, _ := reader.ReadString('\n')
+	bpmInput = strings.TrimSpace(bpmInput)
+	if bpmInput == "" {
+		bpmInput = defaultBPM
+	}
+
+	fmt.Printf("Enter beats per measure for '%s' (default: %s): ", songName, defaultBeatsPerMeasure)
+	beatsInput, _ := reader.ReadString('\n')
+	beatsInput = strings.TrimSpace(beatsInput)
+	if beatsInput == "" {
+		beatsInput = defaultBeatsPerMeasure
+	}
+
+	return bpmInput, beatsInput
+}
+
+// Function to detect BPM from filename or prompt user
+func detectAudioMetadata(wavFilePath string, config *Config) (string, string) {
+	// First, check if BPM is encoded in the filename (e.g., "song-120bpm.wav")
+	fileName := filepath.Base(wavFilePath)
+	fileNameLower := strings.ToLower(fileName)
+
+	// Try to extract BPM from filename pattern like "120bpm" or "bpm120"
+	if strings.Contains(fileNameLower, "bpm") {
+		// Look for patterns like "120bpm" or "120-bpm"
+		words := strings.FieldsFunc(fileNameLower, func(r rune) bool {
+			return r == '-' || r == '_' || r == ' '
+		})
+
+		for i, word := range words {
+			// Check if word contains "bpm"
+			if strings.Contains(word, "bpm") {
+				// Extract numbers from this word
+				numStr := strings.Map(func(r rune) rune {
+					if r >= '0' && r <= '9' {
+						return r
+					}
+					return -1
+				}, word)
+
+				if numStr != "" {
+					if _, err := strconv.Atoi(numStr); err == nil {
+						return numStr, config.BeatsPerMeasure
+					}
+				}
+
+				// Also check the previous word if it's just numbers
+				if i > 0 {
+					prevWord := words[i-1]
+					if _, err := strconv.Atoi(prevWord); err == nil {
+						return prevWord, config.BeatsPerMeasure
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback: prompt user
+	return promptForAudioMetadata(fileName, config.BeatsPerMinute, config.BeatsPerMeasure)
+}
+
 // Function to create directory structure based on the number of WAV files
-func createDirectoryStructure(driveLetter, jamManType, wavFileLoc string) {
+func createDirectoryStructure(driveLetter, jamManType, wavFileLoc string, config *Config) {
 	var rootDir string
 
 	// Determine the root directory based on JamMan type
@@ -346,7 +425,7 @@ func createDirectoryStructure(driveLetter, jamManType, wavFileLoc string) {
 	fmt.Println("Necessary directories created successfully.")
 
 	// Handle copying WAV files and creating CSV and XML
-	err = handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc)
+	err = handleWavFilesAndCreateCSV(driveLetter, rootDir, wavFileLoc, config)
 	if err != nil {
 		log.Fatalf("Error handling WAV files and creating CSV/XML: %v", err)
 	}
@@ -374,7 +453,7 @@ func main() {
 	// Confirm the drive letter with the user
 	fmt.Printf("Found MicroSD card at drive '%s'. Is this correct? (y/n): ", driveLetter)
 	var response string
-	fmt.Scanln(&response) 
+	fmt.Scanln(&response)
 
 	if response != "y" {
 		fmt.Print("Please enter the correct drive letter: ")
@@ -382,5 +461,5 @@ func main() {
 	}
 
 	// Create the directory structure and handle WAV files and XML generation
-	createDirectoryStructure(driveLetter, config.JamManType, config.WavFileLoc)
+	createDirectoryStructure(driveLetter, config.JamManType, config.WavFileLoc, config)
 }
