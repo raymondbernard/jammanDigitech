@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -60,31 +59,6 @@ func loadConfig(file string) (*Config, error) {
 	}
 
 	return config, nil
-}
-
-// Function to find the drive letter for the given volume name
-func findDriveByVolume(volumeName string) (string, error) {
-	// Use `wmic` to list logical drives with their volume names
-	cmd := exec.Command("wmic", "logicaldisk", "get", "VolumeName,DeviceID")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("failed to execute wmic command: %v", err)
-	}
-
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	for scanner.Scan() {
-		line := scanner.Text()
-		// Check if the volume name matches
-		if strings.Contains(line, volumeName) {
-			// Extract the drive letter from the line
-			parts := strings.Fields(line)
-			if len(parts) > 1 {
-				return parts[0], nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("drive with volume name '%s' not found", volumeName)
 }
 
 // Function to check if the directory exists and ask for user input
@@ -312,70 +286,72 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-// Function to prompt user for BPM and beats per measure for a song
-func promptForAudioMetadata(songName string, defaultBPM, defaultBeatsPerMeasure string) (string, string) {
-	reader := bufio.NewReader(os.Stdin)
-
-	fmt.Printf("\nEnter BPM for '%s' (default: %s): ", songName, defaultBPM)
-	bpmInput, _ := reader.ReadString('\n')
-	bpmInput = strings.TrimSpace(bpmInput)
-	if bpmInput == "" {
-		bpmInput = defaultBPM
-	}
-
-	fmt.Printf("Enter beats per measure for '%s' (default: %s): ", songName, defaultBeatsPerMeasure)
-	beatsInput, _ := reader.ReadString('\n')
-	beatsInput = strings.TrimSpace(beatsInput)
-	if beatsInput == "" {
-		beatsInput = defaultBeatsPerMeasure
-	}
-
-	return bpmInput, beatsInput
-}
-
-// Function to detect BPM from filename or prompt user
+// Function to detect BPM and time signature from filename or use config default
 func detectAudioMetadata(wavFilePath string, config *Config) (string, string) {
-	// First, check if BPM is encoded in the filename (e.g., "song-120bpm.wav")
+	// Pattern: name-120bpm-4.4 or name-120bpm-6.8
 	fileName := filepath.Base(wavFilePath)
 	fileNameLower := strings.ToLower(fileName)
 
-	// Try to extract BPM from filename pattern like "120bpm" or "bpm120"
-	if strings.Contains(fileNameLower, "bpm") {
-		// Look for patterns like "120bpm" or "120-bpm"
-		words := strings.FieldsFunc(fileNameLower, func(r rune) bool {
-			return r == '-' || r == '_' || r == ' '
-		})
+	var detectedBPM string
+	var detectedBeatsPerMeasure string
 
-		for i, word := range words {
-			// Check if word contains "bpm"
-			if strings.Contains(word, "bpm") {
-				// Extract numbers from this word
-				numStr := strings.Map(func(r rune) rune {
-					if r >= '0' && r <= '9' {
-						return r
-					}
-					return -1
-				}, word)
+	// Split by common delimiters
+	parts := strings.FieldsFunc(fileNameLower, func(r rune) bool {
+		return r == '-' || r == '_' || r == ' '
+	})
 
-				if numStr != "" {
-					if _, err := strconv.Atoi(numStr); err == nil {
-						return numStr, config.BeatsPerMeasure
-					}
+	// Look for BPM (contains "bpm") and time signature (contains dot)
+	for i, part := range parts {
+		// Check for BPM pattern
+		if strings.Contains(part, "bpm") {
+			// Extract numbers from this part
+			numStr := strings.Map(func(r rune) rune {
+				if r >= '0' && r <= '9' {
+					return r
 				}
+				return -1
+			}, part)
 
-				// Also check the previous word if it's just numbers
-				if i > 0 {
-					prevWord := words[i-1]
-					if _, err := strconv.Atoi(prevWord); err == nil {
-						return prevWord, config.BeatsPerMeasure
+			if numStr != "" {
+				if _, err := strconv.Atoi(numStr); err == nil {
+					detectedBPM = numStr
+				}
+			} else if i > 0 {
+				// Check if previous part is just a number
+				if _, err := strconv.Atoi(parts[i-1]); err == nil {
+					detectedBPM = parts[i-1]
+				}
+			}
+		}
+
+		// Check for time signature pattern (X.Y format, like 4.4 or 6.8)
+		if strings.Contains(part, ".") {
+			subParts := strings.Split(part, ".")
+			if len(subParts) == 2 {
+				// Check if both parts are numbers
+				if num1, err1 := strconv.Atoi(subParts[0]); err1 == nil {
+					if num2, err2 := strconv.Atoi(subParts[1]); err2 == nil {
+						// Valid time signature found, use denominator (second number)
+						if num1 > 0 && num2 > 0 { // Basic validation
+							detectedBeatsPerMeasure = subParts[1]
+						}
 					}
 				}
 			}
 		}
 	}
 
-	// Fallback: prompt user
-	return promptForAudioMetadata(fileName, config.BeatsPerMinute, config.BeatsPerMeasure)
+	// If BPM not detected, use config default
+	if detectedBPM == "" {
+		detectedBPM = config.BeatsPerMinute
+	}
+
+	// If time signature not detected, use config default
+	if detectedBeatsPerMeasure == "" {
+		detectedBeatsPerMeasure = config.BeatsPerMeasure
+	}
+
+	return detectedBPM, detectedBeatsPerMeasure
 }
 
 // Function to create directory structure based on the number of WAV files
@@ -444,33 +420,13 @@ func main() {
 		log.Fatalf("Error loading configuration: %v", err)
 	}
 
-	// Try to find the drive letter by the volume name (e.g., 'JAMMAN')
-	driveLetter, err := findDriveByVolume(config.SSDVolumeName)
-
-	// If wmic is not available, prompt user to enter drive letter manually
-	if err != nil {
-		fmt.Printf("Could not auto-detect MicroSD card (wmic not available or drive not found).\n")
-		fmt.Printf("Please enter the drive letter where your '%s' MicroSD card is located (e.g., D, E, F): ", config.SSDVolumeName)
-		fmt.Scanln(&driveLetter)
-
-		// Ensure drive letter has colon
-		if len(driveLetter) == 1 {
-			driveLetter = driveLetter + ":"
-		}
-	} else {
-		// Confirm the drive letter with the user
-		fmt.Printf("Found MicroSD card at drive '%s'. Is this correct? (y/n): ", driveLetter)
-		var response string
-		fmt.Scanln(&response)
-
-		if response != "y" {
-			fmt.Print("Please enter the correct drive letter: ")
-			fmt.Scanln(&driveLetter)
-			if len(driveLetter) == 1 {
-				driveLetter = driveLetter + ":"
-			}
-		}
+	// Use the SSD location from the INI file directly
+	driveLetter := config.SSDVolumeName
+	// Ensure the path ends with a backslash
+	if !strings.HasSuffix(driveLetter, "\\") && !strings.HasSuffix(driveLetter, "/") {
+		driveLetter = driveLetter + "\\"
 	}
+	fmt.Printf("Using SSD location: %s\n", driveLetter)
 
 	// Create the directory structure and handle WAV files and XML generation
 	createDirectoryStructure(driveLetter, config.JamManType, config.WavFileLoc, config)
